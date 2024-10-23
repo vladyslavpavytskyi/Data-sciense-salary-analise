@@ -1,0 +1,592 @@
+---
+title: "Data Science Salaries"
+author: "Vladyslav Pavytskyi"
+date: "2023-11-22"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(gganimate)
+library(countrycode)
+library(ggplot2)
+library(vcd)
+library(leaflet)
+library(readr)
+library(plotly)
+library(rnaturalearth)
+library(sp)
+library(sf)
+library(corrplot)
+```
+
+# Zbiór danych
+
+```{r include=FALSE}
+salaries <- read_csv("ds_salaries.csv", na = "NA",show_col_types = FALSE)
+```
+
+**Zbiór składa się z 11 zmiennych:**
+
+**4 zmienne numeryczne:**
+
+1.  work_year: Rok wypłaty pensji
+
+2.  salary: Kwota wypłaconego wynagrodzenia.
+
+3.  salary_in_usd: Pensja w USD
+
+4.  remote_ratio: Czas pracy zdalniej w procentach
+
+**7** **zmiennych kategorycznych:**
+
+1.  experience_level: Poziom doswiadczenia
+
+2.  employment_type: Rodzaj zatrudnienia dla danej roli
+
+3.  job_title: Stanowisko
+
+4.  salary_currency: Waluta
+
+5.  employee_residence: Kraj zatrudnienia
+
+6.  company_location: Lokalizacja firmy
+
+7.  company_size: Rozmiar firmy
+
+```{r eval=FALSE, include=FALSE}
+head(salaries)
+```
+
+## Data cleaning
+
+```{r eval=FALSE, include=FALSE}
+head(salaries[c(5,6,7)],)
+```
+
+| salary | salary_currency | salary_in_usd |
+|--------|-----------------|---------------|
+| 80000  | EUR             | 85847         |
+| 30000  | USD             | 30000         |
+| 25500  | USD             | 25500         |
+| 175000 | USD             | 175000        |
+| 120000 | USD             | 120000        |
+| 222200 | USD             | 222200        |
+
+W związku z wygodą wykorzystania jednej waluty (USD) usuwamy kolumne salary i salary_currency.
+
+```{r include=FALSE}
+salaries<- subset(salaries, select = -c(salary,salary_currency))
+head(salaries)
+```
+
+```{r include=FALSE}
+colSums(is.na(salaries))
+```
+
+Wartości brakujące:
+
+|                       |                           |                         |
+|----------------------|--------------------------|------------------------|
+| **Work_year : 0**     | **experience_level : 0**  | **employment_type : 0** |
+| **salary_in_usd : 0** | **employee_residence: 0** | **job_title : 0**       |
+| **remote_ratio : 0**  | **company_location : 0**  | **company_size: 0**     |
+
+Żadnych brakujących wartości
+
+# Wizualizacja
+
+Dla wygody korzystania z danych w wizualizacji zmieńmy nazwy wartości zmiennych:
+
+1)  W kolumnie experience_level: SE -\> Senior Level, MI -\> Medium Level, EN -\> Entry Level oraz EX -\> Executive Level
+
+2)  W kolumnie employment_type: FT -\> Full Time, CT -\> Contract, FL -\> Freelance, PT -\> Part Time
+
+3)  W kolumnie remote_ratio: 0 -\> 0%, 50 -\> 50%, 100 -\> 100%
+
+4)  W kolumnie company_size: L -\> Large, M -\> Medium, S -\> Small
+
+5)  
+
+Także w kolumnach company_location i employee_residence zmienimy kody krajów na ich pełne nazwy.
+
+```{r include=FALSE}
+salaries <- salaries %>% 
+  mutate(experience_level = case_when(
+    experience_level == "SE" ~ "Senior Level",
+    experience_level == "MI" ~ "Medium Level",
+    experience_level == "EN" ~ "Entry Level",
+    experience_level == "EX" ~ "Executive Level", 
+  )) %>%  
+  
+  mutate(employment_type = case_when(
+    employment_type == "FT" ~ "Full Time",
+    employment_type == "CT" ~ "Contract",
+    employment_type == "FL" ~ "Freelance",
+    employment_type == "PT" ~ "Part Time", 
+  )) %>% 
+  
+  mutate(remote_ratio = case_when(
+    remote_ratio == "0" ~ "0%",
+    remote_ratio == "50" ~ "50%",
+    remote_ratio == "100" ~ "100%"
+  )) %>%
+  
+  mutate(company_size = case_when(
+    company_size == "L" ~ "Large",
+    company_size == "M" ~ "Medium",
+    company_size == "S" ~ "Small"
+  )) %>% 
+  
+  mutate(company_location = countrycode(salaries$employee_residence, "iso2c", "country.name")) %>% 
+  mutate(employee_residence = countrycode(salaries$employee_residence, "iso2c", "country.name"))
+  
+  
+```
+
+## Popularne stanowiska w firmach
+
+|     | job_title                 | count |
+|-----|---------------------------|-------|
+| 1   | Data Engineer             | 1040  |
+| 2   | Data Scientist            | 840   |
+| 3   | Data Analyst              | 612   |
+| 4   | Machine Learning Engineer | 289   |
+| 5   | Analytics Engineer        | 103   |
+| 6   | Data Architect            | 101   |
+| 7   | Research Scientist        | 82    |
+| 8   | Applied Scientist         | 58    |
+
+```{r include=FALSE}
+number_of_occurrences <- salaries %>%
+  group_by(job_title) %>%
+  summarise(count = n()) %>% 
+  arrange(desc(count))
+head(number_of_occurrences,10)
+```
+
+```{r echo=FALSE}
+treemap_plot <- plot_ly(
+  type = "treemap",
+  labels = ~number_of_occurrences$job_title,
+  parents = "",
+  values = ~number_of_occurrences$count,
+  hovertemplate = "%{label}: %{value}"
+)
+
+treemap_plot
+```
+
+Jak widać, jest najwięcej inżynierów danych, a zaraz za nimi plasują się naukowcy zajmujący się danymi i analityków danych.
+
+## Popularne kraje pod względem zatrudnienia
+
+|     | employee_residence | count |
+|-----|--------------------|-------|
+| 1   | United States      | 3004  |
+| 2   | United Kingdom     | 167   |
+| 3   | Canada             | 85    |
+| 4   | Spain              | 80    |
+| 5   | India              | 71    |
+| 6   | Germany            | 48    |
+| 7   | France             | 38    |
+| 8   | Brazil             | 18    |
+
+```{r include=FALSE}
+number_of_occurrences <- salaries %>%
+  group_by(employee_residence) %>%
+  summarise(count = n()) %>% 
+  arrange(desc(count))
+head(number_of_occurrences,10)
+```
+
+```{r echo=FALSE}
+number_of_occurrences <- number_of_occurrences[number_of_occurrences$count > 10, ]
+barplot(number_of_occurrences$count, names.arg = number_of_occurrences$employee_residence, col = "skyblue",
+        main = "Top countries for employment",
+         ylab = "Number of positions",
+        las = 2, cex.names = 0.7)
+```
+
+Stany Zjednoczone oferują najwięcej stanowisk pracy w dziedzinie analizy danych
+
+## Dystrybucja typów zatrudnienia
+
+```{r echo=FALSE}
+group <- table(salaries$employment_type)
+
+plot_data <- data.frame(
+  EmploymentType = factor(names(group), levels = c("Full Time", "Part Time", "Contract", "Freelance")),
+  Count = as.numeric(group)
+)
+fig <- plot_ly(
+  data = plot_data,
+  x = ~EmploymentType,
+  y = ~Count,
+  color = ~EmploymentType,
+  text = ~Count,
+  type = "bar",
+  textposition = "auto"
+) %>%
+  layout(
+    title = "Employment Type Distribution",
+    xaxis = list(title = "Employment Type"),
+    yaxis = list(title = "Count")
+  )
+
+fig
+```
+
+## Analiza wynagrodzeń
+
+Jak widać, spora część osób jest tu zatrudniona na pełen etat.
+Obserwujemy, że freelancing jest obecnie mniej powszechny
+
+### Wynagrodzenie zależne od stanowiska
+
+```{r include=FALSE}
+salary_by_job <- salaries %>%
+  group_by(job_title) %>%
+  summarise(average_value = round(mean(salary_in_usd, na.rm = TRUE))) %>% 
+  arrange(desc(average_value)) %>% 
+  slice_head(n = 8)
+head(salary_by_job,8)
+```
+
+|     | job_title                          | average_value |
+|-----|------------------------------------|---------------|
+| 1   | Data Science Tech Lead             | 375000        |
+| 2   | Cloud Data Architect               | 250000        |
+| 3   | Data Lead                          | 212500        |
+| 4   | Data Analytics Lead                | 211254        |
+| 5   | Principal Data Scientist           | 198171        |
+| 6   | Director of Data Science           | 195141        |
+| 7   | Principal Data Engineer            | 192500        |
+| 8   | Machine Learning Software Engineer | 192420        |
+
+```{r echo=FALSE}
+data <- data.frame(
+  Position= salary_by_job$job_title,
+  count=salary_by_job$average_value
+)
+
+data$fraction <- data$count / sum(data$count)
+data$ymax <- cumsum(data$fraction)
+
+data$ymin <- c(0, head(data$ymax, n=-1))
+
+data$labelPosition <- (data$ymax + data$ymin) / 2
+
+data$label <- paste0("Salary: ", data$count)
+
+ggplot(data, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Position)) +
+  geom_rect() +
+  geom_text( x=1.7, aes(y=labelPosition, label=label, color=Position), size=2.5) + 
+  scale_fill_brewer(palette="Spectral") +
+  scale_color_brewer(palette="Spectral") +
+  coord_polar(theta="y") +
+  xlim(c(-1, 4)) +
+  theme_void() 
+
+```
+
+Zgodnie z naszymi oczekiwaniami wyższe są przeciętne wynagrodzenia osób zatrudnionych na ogół na stanowiskach kierowniczych.
+Ze względu na trend przetwarzania w chmurze, architekt danych w chmurze jest drugim najlepiej opłacanym zawodem.
+
+### Wynagrodzenia uzależnione od doświadczenia
+
+|     | experience_level | average_value |
+|-----|------------------|---------------|
+| 1   | Executive Level  | 194931        |
+| 2   | Senior Level     | 153051        |
+| 3   | Medium Level     | 104526        |
+| 4   | Entry Level      | 78546         |
+
+```{r include=FALSE}
+salary_by_experience <- salaries %>%
+  group_by(experience_level) %>%
+  summarise(average_value = round(mean(salary_in_usd, na.rm = TRUE))) %>% 
+  arrange(desc(average_value))
+salary_by_experience
+```
+
+```{r echo=FALSE}
+ggplot(salary_by_experience, aes(x = experience_level, y = average_value, fill = experience_level)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Average Salaries based on Experience",
+       x = "Experience level",
+       y = "Salary",
+       fill = "Experience level") +
+  theme_minimal()
+```
+
+Na tym wykresie widać najwyższe średnie wynagrodzenie zarabiają menedżerowie na poziomie Executive -- 194 931 dolarów, następnie programiści na poziomie Senior -- 153 051 dolarów, programiści na poziomie średnim -- 104 526 dolarów i wreszcie programiści na poziomie podstawowym -- 78 546
+
+### Wynagrodzenia w zależności od rodzaju zatrudnienia
+
+```{r include=FALSE}
+salary_by_employment_type <- salaries %>%
+  group_by(employment_type) %>%
+  summarise(average_value = round(mean(salary_in_usd, na.rm = TRUE))) %>% 
+  arrange(desc(average_value))
+salary_by_employment_type
+```
+
+|     | employment_type | average_value |
+|-----|-----------------|---------------|
+| 1   | Full Time       | 138314        |
+| 2   | Contract        | 113447        |
+| 3   | Freelance       | 51808         |
+| 4   | Part Time       | 39534         |
+
+```{r echo=FALSE}
+barplot(salary_by_employment_type$average_value,
+        names.arg = salary_by_employment_type$employment_type,
+        col = c("skyblue", "salmon", "lightgreen", "orange"),
+        main = "Average salaries by employment type",
+        xlab = "Employment type",
+        ylab = "Average salary"
+)
+```
+
+Jak widać, najwyższe średnie wynagrodzenie wynoszą 138 314 dolarów, a na drugim miejscu znajdują się pracownicy kontraktowi z wynagrodzeniem w wysokości 113 447 dolarów.
+Freelancerzy i pracownicy zatrudnieni w niepełnym wymiarze godzin zarabiają odpowiednio mniej, odpowiednio 51 808 dolarów i 39 534 dolarów
+
+### Wynagrodzenie uzależnione od czasu pracy zdalnej
+
+```{r include=FALSE}
+salary_by_remoteratio <- salaries %>%
+  group_by(remote_ratio) %>%
+  summarise(average_value = round(mean(salary_in_usd, na.rm = TRUE))) %>% 
+  arrange(desc(average_value))
+salary_by_remoteratio
+```
+
+|     | remote_ratio | average_value |
+|-----|--------------|---------------|
+| 1   | 0%           | 144316        |
+| 2   | 100%         | 136481        |
+| 3   | 50%          | 78401         |
+
+-   **0% : Brak pracy zdalnej (mniej niż 20%)**
+
+-   **50% : Częściowo zdalnie**
+
+-   **100% : Całkowicie zdalnie (ponad 80%)**
+
+```{r echo=FALSE}
+ggplot(salary_by_remoteratio, aes(x = remote_ratio, y = average_value, fill = remote_ratio)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Average Salaries based on Remote Ratio(%)",
+       y = "Salary",
+       x = "",
+       fill = "Remote Ratio(%)") +
+  theme_minimal()
+```
+
+Pracownicy pracujący offline mają najwyższą średnią pensję wynoszącą 144316 dolarów, pracownicy pracujący zdalnie zarabiają 136481 dolarów.
+
+### Wynagrodzenia uzależnione od lokalizacji firmy
+
+```{r include=FALSE}
+salary_by_country <- salaries %>%
+  group_by(company_location) %>%
+  summarise(average_value = mean(salary_in_usd, na.rm = TRUE)) %>% 
+  arrange(desc(average_value)) %>%
+  slice(c(-1,-2,-3)) 
+salary_by_country
+```
+
+|     | company_location     | average_value |
+|-----|----------------------|---------------|
+| 1   | United States        | 152822.01     |
+| 2   | Canada               | 132222.91     |
+| 3   | China                | 125404.00     |
+| 4   | New Zealand          | 125000.00     |
+| 5   | Bosnia & Herzegovina | 120000.00     |
+| 6   | Ireland              | 114943.43     |
+| 7   | Dominican Republic   | 110000.00     |
+| 8   | Sweden               | 105000.00     |
+
+```{r echo=FALSE}
+world <- rnaturalearth::countries110
+map_data <- merge(world, salary_by_country, by.x = "NAME_CIAWF", by.y = "company_location")
+
+map <- leaflet(data = map_data) %>%
+  addTiles()
+
+color_palette <- colorNumeric(palette = "inferno", domain = map_data$srednia_wartosc)
+
+map <- map %>%
+  addPolygons(
+    fillColor = ~color_palette(average_value),
+    fillOpacity = 0.7,
+    color = "white",
+    weight = 1,
+    popup = ~paste(
+      "Country: ", NAME ,"<br/>", 
+      "Salary: ", round(average_value, 0), 
+      sep="")
+  )
+
+map <- map %>%
+  addLegend(pal = color_palette, values = ~average_value, title = "Average salary", opacity = 0.7)
+map
+```
+
+Ze względu na duże zapotrzebowanie na analityków danych Stany Zjednoczone oferują najwyższą średnią pensję i najwięcej miejsc pracy
+
+### Wynagrodzenia uzależnione od wielkości firmy
+
+|     | company_size | average_value |
+|-----|--------------|---------------|
+| 1   | Medium       | 143130.55     |
+| 2   | Large        | 118300.98     |
+| 3   | Small        | 78226.68      |
+
+```{r include=FALSE}
+salary_by_companysize <- salaries %>%
+  group_by(company_size) %>%
+  summarise(average_value = mean(salary_in_usd, na.rm = TRUE)) %>% 
+  arrange(desc(average_value))
+salary_by_companysize
+```
+
+```{r echo=FALSE}
+ggplot(salary_by_companysize, aes(x = reorder(company_size, -average_value), 
+                         y = average_value, fill = company_size)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Average Salaries based on Company Size",
+       x="",
+       y = "Salary",
+       fill = "Company Size") +
+  theme_minimal()
+```
+
+Najwyższe średnie wynagrodzenie oferują średnie firmy, wynoszące około 143 130 USD.
+W ślad za nimi podążają duże firmy ze średnią kwotą około 118 300 USD.
+Małe firmy oferują niższą średnią pensję wynoszącą około 78 226 USD.
+
+### Analiza roku pracy
+
+|     | work_year | average_value |
+|-----|-----------|---------------|
+| 1   | 2020      | 92302.63      |
+| 2   | 2021      | 94087.21      |
+| 3   | 2022      | 133338.62     |
+| 4   | 2023      | 149045.54     |
+
+```{r include=FALSE}
+salary_by_year <- salaries %>%
+  group_by(work_year) %>%
+  summarise(average_value = mean(salary_in_usd, na.rm = TRUE)) 
+salary_by_year
+```
+
+```{r echo=FALSE}
+ggplot(salary_by_year, aes(x = work_year, y = average_value)) +
+  geom_line(color = "blue") +
+  geom_point(color = "yellow", size = 3) +
+  labs(title = "Average Salaries based on Work Year",
+       x = "Work Year",
+       y = "Salary") +
+  theme_minimal()
+  
+```
+
+```{r eval=FALSE, include=FALSE}
+library(gifski)
+animated_barplot <- ggplot(salary_by_year, aes(x = work_year, y = average_value , fill = factor(work_year))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Average salary",
+       x = "Year", y = "Avarage salary") +
+  transition_states(work_year, transition_length = 2, state_length = 1) +
+  enter_fade() +
+  exit_fade()+
+  guides(fill = guide_legend(title = "Year"))
+
+animation <- animate(animated_barplot, 
+                     nframes = 100, 
+                     fps = 10, 
+                     renderer = gifski_renderer())
+anim_save("animated_barplot.gif", animation)
+```
+
+<img src="animated_barplot.gif" alt="Animated GIF"/>
+
+Jak widać, przeciętne wynagrodzenie na stanowiskach pracy opartych na danych rośnie z roku na rok, przy czym szczególnie znaczący skok zaobserwowano pomiędzy rokiem 2021 a 2022.
+Tendencja ta podkreśla rosnące zapotrzebowanie na wykwalifikowanych specjalistów w tej dziedzinie.
+
+# Podsumowanie
+
+**Trendy płacowe:**
+
+-   Minimalna zmiana w latach 2020-2021.
+
+-   Dalsze wahania w latach 2021-2022.
+
+-   Podobny schemat w latach 2022-2023.
+
+**Wpływ wielkości firmy:**
+
+-   Średnie firmy odnotowują wzrost wynagrodzeń.
+
+-   Duże firmy mają stabilne wynagrodzenia.
+
+**Poziom doświadczenia:**
+
+-   Doświadczeni profesjonaliści zarabiają najwięcej.
+
+-   Następni są seniorzy, potem średni i podstawowy.
+
+**Rodzaje zatrudnienia:**
+
+-   Pełny etat ma najwyższą średnią.
+
+-   Kontrahenci też dobrze zarabiają.
+
+-   Freelancerzy i osoby pracujące w niepełnym wymiarze godzin zarabiają mniej.
+    Najpopularniejsze tytuły stanowisk:
+
+**Najlepsze lokalizacje:**
+
+-   USA oferuje najwyższe pensje.
+
+**Wpływ wielkości firmy:**
+
+-   Najwięcej płacą średnie firmy.
+
+**Ekonomiczny wybór:**
+
+-   Doświadczeni wykonawcy zarabiają 416 000 USD.
+
+# Przewidywanie
+
+```{r echo=FALSE}
+selected_columns <- salaries[, c('work_year', 'salary_in_usd')]
+correlation_matrix <- cor(selected_columns)
+
+corrplot(correlation_matrix, method = "number", tl.col = "black", tl.srt = 0)
+```
+
+Wraz ze wzrostem roku rośnie wynagrodzenie, więc w przyszłości wzrosną także wynagrodzenia analityków danych
+
+```{r echo=FALSE}
+counts_by_work_year <- salaries %>%
+  group_by(work_year) %>%
+  summarise(liczba_stanowisk = n()) 
+selected_columns <- counts_by_work_year[, c('work_year', 'liczba_stanowisk')]
+correlation_matrix <- cor(selected_columns)
+
+corrplot(correlation_matrix, method = "number", tl.col = "black", tl.srt = 0)
+
+```
+
+Wraz ze wzrostem roku rośnie liczba stanowisk, więc w przyszłości można spodziewać się wzrostu liczby miejsc pracy.
